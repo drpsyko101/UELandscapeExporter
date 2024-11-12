@@ -23,7 +23,7 @@ namespace LandscapeExtractor
 		{
 			var gameVerOption = new Option<string>(["--ue4", "-u"], () => "4_27", "game version (EGame suffix)") { IsRequired = true };
 			//var pakDirOption = new Option<string>("--pakdir", () => "I:\\Epic Games\\Chivalry2_c\\TBL\\Content\\Paks", "PAK directory path") { IsRequired = true };
-			var pakDirOption = new Option<string>(["--pakdir", "-a"], "PAK directory path") { IsRequired = true };
+			var pakDirOption = new Option<string>(["--pakdir", "-p"], "PAK directory path") { IsRequired = true };
 			var aesKeyOption = new Option<string>(["--aes", "-a"], () => "0x0000000000000000000000000000000000000000000000000000000000000000", "AES key") { IsRequired = false };
 			var outDirOption = new Option<string>(["--outdir", "-o"], () => "output", "Output directory path") { IsRequired = true };
 
