@@ -399,3 +399,6 @@ FodyWeavers.xsd
 *.idea
 
 build
+
+# generated output files when unspecified
+output/

@@ -17,6 +17,8 @@ Options:
   -a, --aes <aes>                   AES key [default:
                                     0x0000000000000000000000000000000000000000000000000000000000000000]
   -o, --outdir <outdir> (REQUIRED)  Output directory path [default: output]
+  -m, --mapping <mapping>           Mapping file for unversioned properties
+  -i, --imgtype <Dds|Jpeg|Png|Tga>  Image output type [default: Png]
   --version                         Show version information
   -?, -h, --help                    Show help and usage information
 ```

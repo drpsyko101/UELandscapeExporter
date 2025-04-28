@@ -14,12 +14,9 @@ using Newtonsoft.Json;
 using Serilog;
 using Serilog.Sinks.SystemConsole.Themes;
 using System.Threading.Tasks;
-using Org.BouncyCastle.Asn1;
-using static SharpGLTF.Scenes.LightBuilder;
-using CUE4Parse.UE4.Objects.UObject;
-using CUE4Parse.UE4.Assets.Objects.Properties;
-using System.ComponentModel;
 using System.Collections.Generic;
+using System.Globalization;
+using CUE4Parse.MappingsProvider;
 
 namespace LandscapeExtractor
 {
@@ -32,16 +29,20 @@ namespace LandscapeExtractor
 			var pakDirOption = new Option<string>(["--pakdir", "-p"], "PAK directory path") { IsRequired = true }; 
 			var aesKeyOption = new Option<string>(["--aes", "-a"], () => "0x0000000000000000000000000000000000000000000000000000000000000000", "AES key") { IsRequired = false };
 			var outDirOption = new Option<string>(["--outdir", "-o"], () => "output", "Output directory path") { IsRequired = true };
+			var mappingPathOption = new Option<string>(["--mapping", "-m"], "Mapping file for unversioned properties") { IsRequired = false };
+			var imgOutputType = new Option<ETextureFormat>(["--imgtype", "-i"], () => ETextureFormat.Png, "Image output type") { IsRequired = false };
 
-			var rootCommand = new RootCommand("Extracts heightmaps, weightmaps and Landscape json from all .umaps");
+            var rootCommand = new RootCommand("Extracts heightmaps, weightmaps and Landscape json from all .umaps");
 			rootCommand.AddOption(gameVerOption);
 			rootCommand.AddOption(pakDirOption);
 			rootCommand.AddOption(aesKeyOption);
 			rootCommand.AddOption(outDirOption);
+			rootCommand.AddOption(mappingPathOption);
+			rootCommand.AddOption(imgOutputType);
 
-			Log.Logger = new LoggerConfiguration().WriteTo.Console(Serilog.Events.LogEventLevel.Fatal, theme: AnsiConsoleTheme.Literate).CreateLogger();
+            Log.Logger = new LoggerConfiguration().WriteTo.Console(Serilog.Events.LogEventLevel.Fatal, theme: AnsiConsoleTheme.Literate).CreateLogger();
 
-			rootCommand.SetHandler((pakDir, outDir, aesKey, gameVersionStr) =>
+			rootCommand.SetHandler((pakDir, outDir, aesKey, gameVersionStr, mappingPath, imgType) =>
 			{
 				gameVersionStr = (String)gameVersionStr.Replace('.', '_');
 				Enum.TryParse("GAME_UE" + gameVersionStr, out EGame game_ver);
@@ -49,8 +50,12 @@ namespace LandscapeExtractor
 				Console.WriteLine("Output directory: {0}", System.IO.Path.GetFullPath(outDir));
 				Console.WriteLine("UE Version: {0}", game_ver);
 
-				var provider = new DefaultFileProvider(pakDir, System.IO.SearchOption.TopDirectoryOnly, true, new VersionContainer(game_ver));
+				var provider = new DefaultFileProvider(pakDir, System.IO.SearchOption.TopDirectoryOnly, new VersionContainer(game_ver), StringComparer.Create(CultureInfo.CurrentCulture, true));
 				//provider.MappingsContainer = new FileUsmapTypeMappingsProvider(_mapping);
+				if (!string.IsNullOrEmpty(mappingPath))
+				{
+					provider.MappingsContainer = new FileUsmapTypeMappingsProvider(mappingPath);
+				}
 
 				provider.Initialize();
 				provider.SubmitKey(new FGuid(), new FAesKey(aesKey)); // decrypt basic info (1 guid - 1 key)
@@ -121,8 +126,8 @@ namespace LandscapeExtractor
 						Console.WriteLine("Found multiple landscapes ({0})!", landscapes.Count());
 						foreach (var landscape in landscapes) { Console.WriteLine(landscape.ObjectName); }
 					}
-					var pkg_data = provider.LoadAllObjects(pkg.Name);
-					var obj = provider.LoadObject(pkg.Name);
+					var pkg_data = provider.LoadPackage(pkg.Name).GetExports();
+					var obj = provider.LoadPackageObject(pkg.Name);
 					foreach (var landscape in landscapes)
 					{
 						var landscape_name = landscape.ObjectName;
@@ -179,16 +184,16 @@ namespace LandscapeExtractor
 						{
 							if (texExport.OuterIndex.Name != landscape_name.Text)
 								Console.WriteLine("WTFFF");
-							var tex = (UTexture2D)texExport.ExportObject.Value;
+							var tex = (UTexture2D)provider.LoadPackageObject(pkg.Name, texExport.ObjectName.ToString());
 							var lodGrp = tex.Properties.FirstOrDefault(it => it.Name.Text.Equals("LODGroup"))?.Tag;
 							var target_dir = lodGrp.GenericValue.ToString();
 							switch (target_dir)
 							{
-								case "TEXTUREGROUP_Terrain_Heightmap":
+								case "TextureGroup::TEXTUREGROUP_Terrain_Heightmap":
 									target_dir = System.IO.Path.Combine(out_path, "Heightmaps");
 									heightmaps++;
 									break;
-								case "TEXTUREGROUP_Terrain_Weightmap":
+								case "TextureGroup::TEXTUREGROUP_Terrain_Weightmap":
 									target_dir = System.IO.Path.Combine(out_path, "Weightmaps");
 									weightmaps++;
 									break;
@@ -198,26 +203,29 @@ namespace LandscapeExtractor
 
 							}
 
-							using (Stream s = File.OpenWrite(System.IO.Path.Combine(target_dir, tex.Name + ".png")))
+							var bitmap = TextureDecoder.Decode(tex);
+							var data = bitmap.Encode(imgType, out var extension);
+							using (Stream s = File.OpenWrite(System.IO.Path.Combine(target_dir, tex.Name + "." + extension)))
 							{
-								var bitmap = TextureDecoder.Decode(tex);
 								if (bitmap != null)
-									bitmap.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100).SaveTo(s);
+									s.Write(data);
 								else
 									Console.WriteLine("Failed to decode {0}!", tex.Name);
 
 							}
+                            Console.Write("\rExporting {0} out of {1} texture(s)...   ", weightmaps + heightmaps, textures.Count());
 
-						}
+                        }
+						Console.Write("\rExported {0} out of {1} texture(s)    \n", weightmaps + heightmaps, textures.Count());
 						Console.WriteLine("{3} Components: {2} Heightmaps: {0} Weightmaps: {1}", heightmaps, weightmaps, landscape_components.Count(), landscape_name.Text);
 					}
 
 				}
-				Console.WriteLine("Handled {0} maps:", validLandscapeMaps.Count());
+				Console.WriteLine("Handled {0} maps:", validLandscapeMaps.Count);
 				foreach (var map in validLandscapeMaps)
 					Console.WriteLine(map);
 
-			}, pakDirOption, outDirOption, aesKeyOption, gameVerOption);
+			}, pakDirOption, outDirOption, aesKeyOption, gameVerOption, mappingPathOption, imgOutputType);
 
 
 			return await rootCommand.InvokeAsync(args);
